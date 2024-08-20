@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Callable
-from typing import cast
+from typing import cast, List
 
 import torch
 import torch.distributed as dist
@@ -66,47 +66,60 @@ class KFACInverseLayer(KFACBaseLayer):
 
         # Inverse state variables
         # Inverse of self.a_factor
-        self._a_inv: torch.Tensor | FutureType | None = None
+        self._a_inv: torch.Tensor | List[torch.Tensor] | FutureType | None = None
         # Inverse of self.g_factor
-        self._g_inv: torch.Tensor | FutureType | None = None
+        self._g_inv: torch.Tensor | List[torch.Tensor] | FutureType | None = None
 
     @property
-    def a_inv(self) -> torch.Tensor | None:
+    def a_inv(self) -> torch.Tensor | List[torch.Tensor] | None:
         """Get A inverse."""
         if isinstance(self._a_inv, Future):
             self._a_inv = cast(torch.Tensor, self._a_inv.wait())
         return self._a_inv
 
     @a_inv.setter
-    def a_inv(self, value: torch.Tensor | FutureType | None) -> None:
+    def a_inv(self, value: torch.Tensor | List[torch.Tensor] | FutureType | None) -> None:
         """Set A inverse."""
         self._a_inv = value
 
     @property
-    def g_inv(self) -> torch.Tensor | None:
+    def g_inv(self) -> torch.Tensor | List[torch.Tensor] | None:
         """Get G inverse."""
         if isinstance(self._g_inv, Future):
             self._g_inv = cast(torch.Tensor, self._g_inv.wait())
         return self._g_inv
 
     @g_inv.setter
-    def g_inv(self, value: torch.Tensor | FutureType | None) -> None:
+    def g_inv(self, value: torch.Tensor | List[torch.Tensor] | FutureType | None) -> None:
         """Set G inverse."""
         self._g_inv = value
 
     def memory_usage(self) -> dict[str, int]:
         """Get memory usage for all variables in the layer."""
         sizes = super().memory_usage()
-        sizes['a_inverses'] = (
-            self.a_inv.nelement() * self.a_inv.element_size()
-            if self.a_inv is not None
-            else 0
-        )
-        sizes['g_inverses'] = (
-            self.g_inv.nelement() * self.g_inv.element_size()
-            if self.g_inv is not None
-            else 0
-        )
+
+        if isinstance(self.a_inv, list):
+            sizes['a_inverses'] = (
+                sum([ai.nelement() * ai.element_size() \
+                for ai in self.a_inv])
+            )
+        else:
+            sizes['a_inverses'] = (
+                self.a_inv.nelement() * self.a_inv.element_size()
+                if self.a_inv is not None
+                else 0
+            )
+        if isinstance(self.a_inv, list):
+            sizes['g_inverses'] = (
+                sum([gi.nelement() * gi.element_size() \
+                for gi in self.g_inv])
+            )
+        else:
+            sizes['g_inverses'] = (
+                self.g_inv.nelement() * self.g_inv.element_size()
+                if self.g_inv is not None
+                else 0
+            )
         return sizes
 
     def broadcast_a_inv(

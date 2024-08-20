@@ -16,6 +16,8 @@ from kfac.enums import AllreduceMethod
 from kfac.layers.base import KFACBaseLayer
 from kfac.layers.modules import ModuleHelper
 
+from .modules import E3nnTPModuleHelper
+
 
 class KFACEigenLayer(KFACBaseLayer):
     """KFAC layer that preconditions gradients with eigen decomposition."""
@@ -72,79 +74,102 @@ class KFACEigenLayer(KFACBaseLayer):
 
         # Eigen state variables
         # Eigenvectors of self.a_factor
-        self._qa: torch.Tensor | FutureType | None = None
+        self._qa: torch.Tensor | List[torch.Tensor] | FutureType | None = None
         # Eigenvectors of self.g_factor
-        self._qg: torch.Tensor | FutureType | None = None
+        self._qg: torch.Tensor | List[torch.Tensor] | FutureType | None = None
         # Eigenvalues of self.a_factor
-        self._da: torch.Tensor | FutureType | None = None
+        self._da: torch.Tensor | List[torch.Tensor] | FutureType | None = None
         # Eigenvalues of self.g_factor
-        self._dg: torch.Tensor | FutureType | None = None
+        self._dg: torch.Tensor | List[torch.Tensor] | FutureType | None = None
         # Outer product + damping of eigenvalues
         # Only used if self.prediv_eigenvalues
-        self._dgda: torch.Tensor | FutureType | None = None
+        self._dgda: torch.Tensor | List[torch.Tensor] | FutureType | None = None
+
+        self._list_tensors = True if isinstance(module, E3nnTPModuleHelper) else False
 
     @property
-    def qa(self) -> torch.Tensor | None:
+    def qa(self) -> torch.Tensor | List[torch.Tensor] | None:
         """Get eigen vectors of A."""
-        if isinstance(self._qa, Future):
-            self._qa = cast(torch.Tensor, self._qa.wait())
+        if isinstance(self._qa, Future) or \
+                (isinstance(self._qa, list) and isinstance(self._qa[0], Future)):
+            if self._list_tensors:
+                self._qa = [cast(torch.Tensor, qa.wait()) for qa in self._qa]
+            else:
+                self._qa = cast(torch.Tensor, self._qa.wait())
         return self._qa
 
     @qa.setter
-    def qa(self, value: torch.Tensor | FutureType | None) -> None:
+    def qa(self, value: torch.Tensor | List[torch.Tensor] | FutureType | None) -> None:
         """Set eigen vectors of A."""
         self._qa = value
 
     @property
-    def qg(self) -> torch.Tensor | None:
+    def qg(self) -> torch.Tensor | List[torch.Tensor] | None:
         """Get eigen vectors of G."""
-        if isinstance(self._qg, Future):
-            self._qg = cast(torch.Tensor, self._qg.wait())
+        if isinstance(self._qg, Future) or \
+                (isinstance(self._qg, list) and isinstance(self._qg[0], Future)):
+            if self._list_tensors:
+                self._qg = [cast(torch.Tensor, qg.wait()) for qg in self._qg]
+            else:
+                self._qg = cast(torch.Tensor, self._qg.wait())
         return self._qg
 
     @qg.setter
-    def qg(self, value: torch.Tensor | FutureType | None) -> None:
+    def qg(self, value: torch.Tensor | List[torch.Tensor] | FutureType | None) -> None:
         """Set eigen vectors of G."""
         self._qg = value
 
     @property
-    def da(self) -> torch.Tensor | None:
+    def da(self) -> torch.Tensor | List[torch.Tensor] | None:
         """Get eigen values of A."""
-        if isinstance(self._da, Future):
-            self._da = cast(torch.Tensor, self._da.wait())
+        if isinstance(self._da, Future) or \
+                (isinstance(self._da, list) and isinstance(self._da[0], Future)):
+            if self._list_tensors:
+                self._da = [cast(torch.Tensor, da.wait()) for da in self._da]
+            else:
+                self._da = cast(torch.Tensor, self._da.wait())
         return self._da
 
     @da.setter
-    def da(self, value: torch.Tensor | FutureType | None) -> None:
+    def da(self, value: torch.Tensor | List[torch.Tensor] | FutureType | None) -> None:
         """Set eigen values of A."""
         self._da = value
 
     @property
-    def dg(self) -> torch.Tensor | None:
+    def dg(self) -> torch.Tensor | List[torch.Tensor] | None:
         """Get eigen values of G."""
-        if isinstance(self._dg, Future):
-            self._dg = cast(torch.Tensor, self._dg.wait())
+        if isinstance(self._dg, Future) or \
+                (isinstance(self._dg, list) and isinstance(self._dg[0], Future)):
+            if self._list_tensors:
+                self._dg = [cast(torch.Tensor, dg.wait()) for dg in self._dg]
+            else:
+                self._dg = cast(torch.Tensor, self._dg.wait())
         return self._dg
 
     @dg.setter
-    def dg(self, value: torch.Tensor | FutureType | None) -> None:
+    def dg(self, value: torch.Tensor | List[torch.Tensor] | FutureType | None) -> None:
         """Set eigen values of G."""
         self._dg = value
 
     @property
-    def dgda(self) -> torch.Tensor | None:
+    def dgda(self) -> torch.Tensor | List[torch.Tensor] | None:
         """Get precomputed eigen values for preconditioning."""
-        if isinstance(self._dgda, Future):
-            self._dgda = cast(torch.Tensor, self._dgda.wait())
+        if isinstance(self._dgda, Future) or \
+                (isinstance(self._dgda, list) and isinstance(self._dgda[0], Future)):
+            if self._list_tensors:
+                self._dgda = [cast(torch.Tensor, dgda.wait()) for dgda in self._dgda]
+            else:
+                self._dgda = cast(torch.Tensor, self._dgda.wait())
         return self._dgda
 
     @dgda.setter
-    def dgda(self, value: torch.Tensor | FutureType | None) -> None:
+    def dgda(self, value: torch.Tensor | List[torch.Tensor] | FutureType | None) -> None:
         """Set precomputed eigen values for preconditioning."""
         self._dgda = value
 
     def memory_usage(self) -> dict[str, int]:
         """Get memory usage for all variables in the layer."""
+        # TODO: add tensor list support
         sizes = super().memory_usage()
         a_size = (
             self.qa.nelement() * self.qa.element_size()
@@ -200,30 +225,67 @@ class KFACEigenLayer(KFACBaseLayer):
                     f'Attempt to broadcast A inv from src={src} but this rank '
                     'has not computed A inv yet.',
                 )
-            assert isinstance(self.a_factor, torch.Tensor)
-            self.qa = torch.empty(
-                self.a_factor.shape,
-                device=self.a_factor.device,
-                dtype=self.inv_dtype,
-            )
-            self.da = torch.empty(
-                self.a_factor.shape[0],
-                device=self.a_factor.device,
-                dtype=self.inv_dtype,
-            )
+            assert isinstance(self.a_factor, torch.Tensor) or isinstance(self.a_factor, list)
 
-        self.qa = self.tdc.broadcast(  # type: ignore
-            self.qa,
-            src=src,
-            group=group,
-        )
-        if not self.prediv_eigenvalues:
-            assert self.da is not None
-            self.da = self.tdc.broadcast(  # type: ignore
-                self.da,
+            if self._list_tensors:
+                self.qa = [
+                    torch.empty(
+                        af.shape,
+                        device=af.device,
+                        dtype=self.inv_dtype,
+                    ) for af in self.a_factor
+                ]
+                self.da = [
+                    torch.empty(
+                        af.shape[0],
+                        device=af.device,
+                        dtype=self.inv_dtype,
+                    ) for af in self.a_factor
+                ]
+
+            else:
+                self.qa = torch.empty(
+                    self.a_factor.shape,
+                    device=self.a_factor.device,
+                    dtype=self.inv_dtype,
+                )
+                self.da = torch.empty(
+                    self.a_factor.shape[0],
+                    device=self.a_factor.device,
+                    dtype=self.inv_dtype,
+                )
+
+        if self._list_tensors:
+            self.qa = [
+                self.tdc.broadcast(
+                    qa,
+                    src=src,
+                    group=group
+                ) for qa in self.qa
+            ]
+            if not self.prediv_eigenvalues:
+                assert self.da is not None
+                self.da = [
+                    self.tdc.broadcast(
+                        da,
+                        src=src,
+                        group=group,
+                    ) for da in self.da
+                ]
+
+        else:
+            self.qa = self.tdc.broadcast(  # type: ignore
+                self.qa,
                 src=src,
                 group=group,
             )
+            if not self.prediv_eigenvalues:
+                assert self.da is not None
+                self.da = self.tdc.broadcast(  # type: ignore
+                    self.da,
+                    src=src,
+                    group=group,
+                )
 
     def broadcast_g_inv(
         self,
@@ -252,45 +314,100 @@ class KFACEigenLayer(KFACBaseLayer):
                     f'Attempt to broadcast G inv from src={src} but this rank '
                     'has not computed G inv yet.',
                 )
-            assert isinstance(self.g_factor, torch.Tensor)
-            self.qg = torch.empty(
-                self.g_factor.shape,
-                device=self.g_factor.device,
-                dtype=self.inv_dtype,
+            assert isinstance(self.g_factor, torch.Tensor) or isinstance(self.g_factor, list)
+            
+            if self._list_tensors:
+                self.qg = [
+                    torch.empty(
+                        gf.shape,
+                        device=gf.device,
+                        dtype=self.inv_dtype,
+                    ) for gf in self.g_factor
+                ]
+                if not self.prediv_eigenvalues:
+                    self.dg = [
+                        torch.empty(
+                            gf.shape[0],
+                            device=gf.device,
+                            dtype=self.inv_dtype,
+                        ) for gf in self.g_factor
+                    ]
+                else:
+                    assert isinstance(self.a_factor, list)
+                    self.dgda = [
+                        torch.empty(
+                            (gf.shape[0], af.shape[0]),
+                            device=gf.device,
+                            dtype=self.inv_dtype,
+                        ) for gf, af in zip(self.g_factor, self.a_factor)
+                    ]
+
+            else:
+                self.qg = torch.empty(
+                    self.g_factor.shape,
+                    device=self.g_factor.device,
+                    dtype=self.inv_dtype,
+                )
+                if not self.prediv_eigenvalues:
+                    self.dg = torch.empty(
+                        self.g_factor.shape[0],
+                        device=self.g_factor.device,
+                        dtype=self.inv_dtype,
+                    )
+                else:
+                    assert isinstance(self.a_factor, torch.Tensor)
+                    self.dgda = torch.empty(
+                        (self.g_factor.shape[0], self.a_factor.shape[0]),
+                        device=self.g_factor.device,
+                        dtype=self.inv_dtype,
+                    )
+
+        if self._list_tensors:
+            self.pg = [
+                self.tdc.broadcast(
+                    qg,
+                    src=src,
+                    group=group
+                ) for qg in self.qg
+            ]
+            if not self.prediv_eigenvalues:
+                assert self.dg is not None
+                self.dg = [
+                    self.tdc.broadcast(
+                        dg,
+                        src=src,
+                        group=group
+                    ) for dg in self.dg
+                ]
+            else:
+                assert self.dgda is not None
+                self.dgda = [
+                    self.tdc.broadcast(
+                        dgda,
+                        src=src,
+                        group=group,
+                    ) for dgda in self.dgda
+                ]
+        else:
+            self.qg = self.tdc.broadcast(  # type: ignore
+                self.qg,
+                src=src,
+                group=group,
             )
             if not self.prediv_eigenvalues:
-                self.dg = torch.empty(
-                    self.g_factor.shape[0],
-                    device=self.g_factor.device,
-                    dtype=self.inv_dtype,
+                assert self.dg is not None
+                self.dg = self.tdc.broadcast(  # type: ignore
+                    self.dg,
+                    src=src,
+                    group=group,
                 )
             else:
-                assert isinstance(self.a_factor, torch.Tensor)
-                self.dgda = torch.empty(
-                    (self.g_factor.shape[0], self.a_factor.shape[0]),
-                    device=self.g_factor.device,
-                    dtype=self.inv_dtype,
+                assert self.dgda is not None
+                self.dgda = self.tdc.broadcast(  # type: ignore
+                    self.dgda,
+                    src=src,
+                    group=group,
                 )
-
-        self.qg = self.tdc.broadcast(  # type: ignore
-            self.qg,
-            src=src,
-            group=group,
-        )
-        if not self.prediv_eigenvalues:
-            assert self.dg is not None
-            self.dg = self.tdc.broadcast(  # type: ignore
-                self.dg,
-                src=src,
-                group=group,
-            )
-        else:
-            assert self.dgda is not None
-            self.dgda = self.tdc.broadcast(  # type: ignore
-                self.dgda,
-                src=src,
-                group=group,
-            )
 
     def compute_a_inv(self, damping: float = 0.001) -> None:
         """Compute A inverse on assigned rank.
@@ -301,51 +418,99 @@ class KFACEigenLayer(KFACBaseLayer):
             damping (float, optional): damping value to condition inverse
                 (default: 0.001).
         """
-        if not isinstance(self.a_factor, torch.Tensor):
+        if not isinstance(self.a_factor, (torch.Tensor, list)):
             raise RuntimeError(
                 'Cannot eigendecompose A before A has been computed',
             )
 
-        if self.symmetric_factors:
-            self.da, self.qa = torch.linalg.eigh(
-                self.a_factor.to(torch.float32),
-            )
+        if self._list_tensors:
+            if self.symmetric_factors:
+                #import ipdb; ipdb.set_trace()
+                self.da, self.qa = zip(*[
+                    torch.linalg.eigh(
+                        af.to(torch.float32),
+                    ) for af in self.a_factor
+                ])
+            else:
+                da, qa = zip(*[
+                    torch.linalg.eig(
+                        af.to(torch.float32),
+                    ) for af in self.a_factor
+                ])
+                self.da = [mat.real for mat in da]
+                self.qa = [mat.real for mat in qa]
+            self.qa = [cast(torch.Tensor, mat).to(self.inv_dtype) for mat in self.qa]
+            self.da = [torch.clamp(cast(torch.Tensor, mat).to(self.inv_dtype), min=0.0) for mat in self.da]
         else:
-            da, qa = torch.linalg.eig(
-                self.a_factor.to(torch.float32),
-            )
-            self.da = da.real
-            self.qa = qa.real
-        self.qa = cast(torch.Tensor, self.qa).to(self.inv_dtype)
-        self.da = cast(torch.Tensor, self.da).to(self.inv_dtype)
-        self.da = torch.clamp(self.da, min=0.0)
+            if self.symmetric_factors:
+                self.da, self.qa = torch.linalg.eigh(
+                    self.a_factor.to(torch.float32),
+                )
+            else:
+                da, qa = torch.linalg.eig(
+                    self.a_factor.to(torch.float32),
+                )
+                self.da = da.real
+                self.qa = qa.real
+            self.qa = cast(torch.Tensor, self.qa).to(self.inv_dtype)
+            self.da = cast(torch.Tensor, self.da).to(self.inv_dtype)
+            self.da = torch.clamp(self.da, min=0.0)
 
     def compute_g_inv(self, damping: float = 0.001) -> None:
         """See `compute_g_inv`."""
-        if not isinstance(self.g_factor, torch.Tensor):
+        if not isinstance(self.g_factor, (torch.Tensor, list)):
             raise RuntimeError(
                 'Cannot eigendecompose G before G has been computed',
             )
 
-        if self.symmetric_factors:
-            self.dg, self.qg = torch.linalg.eigh(
-                self.g_factor.to(torch.float32),
-            )
+        if self._list_tensors:
+            if self.symmetric_factors:
+                self.dg, self.qg = zip(*[
+                    torch.linalg.eigh(
+                        gf.to(torch.float32),
+                    ) for gf in self.g_factor
+                ])
+            else:
+                dg, qg = torch.linalg.eig(
+                    self.g_factor.to(torch.float32),
+                )
+                dg, qg = zip(*[
+                    torch.linalg.eig(
+                        gf.to(torch.float32),
+                    ) for gf in self.g_factor
+                ])
+                self.dg = [mat.real for mat in dg]
+                self.qg = [mat.real for mat in qg]
+            assert self.dg is not None
+            assert self.da is not None
+
+
+            self.qg = [cast(torch.Tensor, mat).to(self.inv_dtype) for mat in self.qg]
+            self.dg = [torch.clamp(mat.to(self.inv_dtype), min=0.0) for mat in self.dg]
+            if self.prediv_eigenvalues:
+                self.dgda = [1 / (torch.outer(dg, da) + damping) for dg, da in zip(self.dg, self.da)]
+                self.dg = None
+                self.da = None
         else:
-            dg, qg = torch.linalg.eig(
-                self.g_factor.to(torch.float32),
-            )
-            self.dg = dg.real
-            self.qg = qg.real
-        assert self.dg is not None
-        assert self.da is not None
-        self.qg = cast(torch.Tensor, self.qg).to(self.inv_dtype)
-        self.dg = self.dg.to(self.inv_dtype)
-        self.dg = torch.clamp(self.dg, min=0.0)
-        if self.prediv_eigenvalues:
-            self.dgda = 1 / (torch.outer(self.dg, self.da) + damping)
-            self.dg = None
-            self.da = None
+            if self.symmetric_factors:
+                self.dg, self.qg = torch.linalg.eigh(
+                    self.g_factor.to(torch.float32),
+                )
+            else:
+                dg, qg = torch.linalg.eig(
+                    self.g_factor.to(torch.float32),
+                )
+                self.dg = dg.real
+                self.qg = qg.real
+            assert self.dg is not None
+            assert self.da is not None
+            self.qg = cast(torch.Tensor, self.qg).to(self.inv_dtype)
+            self.dg = self.dg.to(self.inv_dtype)
+            self.dg = torch.clamp(self.dg, min=0.0)
+            if self.prediv_eigenvalues:
+                self.dgda = 1 / (torch.outer(self.dg, self.da) + damping)
+                self.dg = None
+                self.da = None
 
     def preconditioned_grad(self, damping: float = 0.001) -> None:
         """Compute precondition gradient of each weight in module.
@@ -370,16 +535,42 @@ class KFACEigenLayer(KFACBaseLayer):
             )
         grad = self.module.get_grad()
         grad_type = grad.dtype
-        grad = grad.to(self.qa.dtype)
-        v1 = self.qg.t() @ grad @ self.qa
-        if self.prediv_eigenvalues:
-            v2 = v1 * self.dgda
+        grad = grad.to(self.qa[0].dtype)
+
+        import ipdb; ipdb.set_trace()
+
+        if self._list_tensors:
+            qg_sizes = [qg.size(0) for qg in self.qg]
+            qa_sizes = [qa.size(0) for qa in self.qa]
+            segment_sizes = [qgs*qas for qgs, qas in zip(qg_sizes, qa_sizes)] 
+            #import ipdb; ipdb.set_trace()
+            grad_segs = list(grad.reshape(-1).split(segment_sizes))
+            
+            conditioned_grads = []
+            for grad, qg, qa, dgda in zip(grad_segs, self.qg, self.qa, self.dgda):
+                v1 = qg.t() @ grad.reshape(qg.size(0), qa.size(0)) @ qa
+                if self.prediv_eigenvalues:
+                    v2 = v1 * dgda
+                else:
+                    v2 = v1 / (
+                            torch.outer(
+                                cast(torch.Tensor, dg),
+                                cast(torch.Tensor, da),
+                            )
+                            + damping
+                        )
+                conditioned_grads.append((qg @ v2 @ qa.t()).to(grad_type).flatten())
+            self.grad = torch.cat(conditioned_grads)
         else:
-            v2 = v1 / (
-                torch.outer(
-                    cast(torch.Tensor, self.dg),
-                    cast(torch.Tensor, self.da),
+            v1 = self.qg.t() @ grad @ self.qa
+            if self.prediv_eigenvalues:
+                v2 = v1 * self.dgda
+            else:
+                v2 = v1 / (
+                    torch.outer(
+                        cast(torch.Tensor, self.dg),
+                        cast(torch.Tensor, self.da),
+                    )
+                    + damping
                 )
-                + damping
-            )
-        self.grad = (self.qg @ v2 @ self.qa.t()).to(grad_type)
+            self.grad = (self.qg @ v2 @ self.qa.t()).to(grad_type)

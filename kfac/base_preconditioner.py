@@ -321,6 +321,7 @@ class BaseKFACPreconditioner:
             `DistributedDataParallel` model wrapper as gradients are
             communicated during `loss.backward()`.
         """
+        #import ipdb; ipdb.set_trace()
         if (
             not self._update_factors_in_hook
             and self.steps % self.factor_update_steps == 0

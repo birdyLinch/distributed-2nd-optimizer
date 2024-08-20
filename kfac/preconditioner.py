@@ -262,6 +262,7 @@ class KFACPreconditioner(BaseKFACPreconditioner):
             skip_layers=self.skip_layers,
             **layer_kwargs,
         )
+
         for name, kfac_layer in kfac_layers.values():
             logger.log(
                 loglevel,

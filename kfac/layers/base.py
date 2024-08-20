@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Callable
-from typing import cast
+from typing import cast, List
 
 import torch
 import torch.distributed as dist
@@ -15,6 +15,10 @@ from kfac.distributed import TorchDistributedCommunicator
 from kfac.enums import AllreduceMethod
 from kfac.layers.modules import ModuleHelper
 
+from .modules import E3nnTPModuleHelper
+
+
+# TODO: Support list of ggts, aats
 
 class KFACBaseLayer:
     """KFAC base layer implementation.
@@ -73,45 +77,56 @@ class KFACBaseLayer:
 
         # KFAC State Variables
         # A factor being accumulated for current batch
-        self._a_batch: torch.Tensor | None = None
+        self._a_batch: torch.Tensor | None | List[torch.Tensor] = None
         # G factor being accumulated for current batch
-        self._g_batch: torch.Tensor | None = None
+        self._g_batch: torch.Tensor | None | List[torch.Tensor] = None
         # Number of inputs accumulated in self.a_batch
         self._a_count: int = 0
         # Number of grads accumulated in self.g_batch
         self._g_count: int = 0
         # Running average of A factor
-        self._a_factor: torch.Tensor | FutureType | None = None
+        self._a_factor: torch.Tensor | FutureType | None | List[torch.Tensor] = None
         # Running average of G factor
-        self._g_factor: torch.Tensor | FutureType | None = None
+        self._g_factor: torch.Tensor | FutureType | None | List[torch.Tensor] = None
         # Preconditioned gradient
         self._grad: torch.Tensor | FutureType | None = None
+
+        self._list_tensors = isinstance(module, E3nnTPModuleHelper)
 
     def __repr__(self) -> str:
         """Representation of KFACBaseLayer."""
         return f'{self.__class__.__name__}({repr(self.module)})'
 
     @property
-    def a_factor(self) -> torch.Tensor | None:
+    def a_factor(self) -> torch.Tensor | List[torch.Tensor] | None:
         """Get A factor."""
-        if isinstance(self._a_factor, Future):
-            self._a_factor = cast(torch.Tensor, self._a_factor.wait())
+        if isinstance(self._a_factor, Future) or \
+            (isinstance(self._a_factor, list) and len(self._a_factor) > 0 and isinstance(self._a_factor[0], Future)):
+            if self._list_tensors:
+                self._a_factor = [cast(torch.Tensor, af.wait()) for af in self._a_factor]
+            else:
+                self._a_factor = cast(torch.Tensor, self._a_factor.wait())
         return self._a_factor
 
     @a_factor.setter
-    def a_factor(self, value: torch.Tensor | FutureType | None) -> None:
+    def a_factor(self, value: torch.Tensor | FutureType | List[torch.Tensor] | None) -> None:
         """Set A factor."""
         self._a_factor = value
 
+
     @property
-    def g_factor(self) -> torch.Tensor | None:
+    def g_factor(self) -> torch.Tensor | List[torch.Tensor] | None:
         """Get G factor."""
-        if isinstance(self._g_factor, Future):
-            self._g_factor = cast(torch.Tensor, self._g_factor.wait())
+        if isinstance(self._g_factor, Future) or \
+            (isinstance(self._g_factor, list) and len(self._g_factor) > 0 and isinstance(self._g_factor[0], Future)):
+            if self._list_tensors:
+                self._g_factor = [cast(torch.Tensor, gf.wait()) for gf in self._g_factor]
+            else:
+                self._g_factor = cast(torch.Tensor, self._g_factor.wait())
         return self._g_factor
 
     @g_factor.setter
-    def g_factor(self, value: torch.Tensor | FutureType | None) -> None:
+    def g_factor(self, value: torch.Tensor | FutureType | List[torch.Tensor] | None) -> None:
         """Set G factor."""
         self._g_factor = value
 
@@ -159,29 +174,52 @@ class KFACBaseLayer:
                 "KFACLayer state_dict must contain keys 'A' and 'G'",
             )
         device = self.module.device
-        if state_dict['A'] is not None:
-            self.a_factor = state_dict['A'].to(device)
+        if state_dict['A'] is not None: 
+            if isinstance(state_dict['A'], list):
+                self.a_factor = [a.to(device) for a in state_dict['A']]
+            else:
+                self.a_factor = state_dict['A'].to(device) # Tensor list can not call `to`
         if state_dict['G'] is not None:
-            self.g_factor = state_dict['G'].to(device)
+            if isinstance(state_dict['G'], list):
+                self.g_factor = [g.to(device) for g in state_dict['G']]
+            else:
+                self.g_factor = state_dict['G'].to(device) # Tensor list can not call `to`
 
     def memory_usage(self) -> dict[str, int]:
         """Returns memory usage of variables in this layer for this worker."""
-        return {
-            'a_factors': self.a_factor.nelement()
-            * self.a_factor.element_size()
-            if self.a_factor is not None
-            else 0,
-            'g_factors': self.g_factor.nelement()
-            * self.g_factor.element_size()
-            if self.g_factor is not None
-            else 0,
-            'a_batch': self._a_batch.nelement() * self._a_batch.element_size()
-            if self._a_batch is not None
-            else 0,
-            'g_batch': self._g_batch.nelement() * self._g_batch.element_size()
-            if self._g_batch is not None
-            else 0,
-        }
+        if isinstance(self.a_factor, list): 
+            a_factor_size = sum([af.nelement() * af.element_size() for af in self.a_factor])
+            g_factor_size = sum([gf.nelement() * gf.element_size() for gf in self.g_factor])
+            a_batch_size = sum([ab.nelement() * ab.element_size() for ab in self._a_batch]) \
+                           if isinstance(self._a_batch, list) \
+                           else self._a_batch.nelement() * self._a_batch.element_size()
+            g_batch_size = sum([gb.nelement() * gb.element_size() for gb in self._g_batch]) \
+                           if isinstance(self._b_batch, list) \
+                           else self._b_batch.nelement() * self._b_batch.element_size()
+            return {
+                'a_factors': a_factor_size,
+                'g_factors': g_factor_size,
+                'a_batch': a_batch_size,
+                'g_batch': g_batch_size,
+            }
+
+        else:
+            return {
+                'a_factors': self.a_factor.nelement()
+                * self.a_factor.element_size()
+                if self.a_factor is not None
+                else 0,
+                'g_factors': self.g_factor.nelement()
+                * self.g_factor.element_size()
+                if self.g_factor is not None
+                else 0,
+                'a_batch': self._a_batch.nelement() * self._a_batch.element_size()
+                if self._a_batch is not None
+                else 0,
+                'g_batch': self._g_batch.nelement() * self._g_batch.element_size()
+                if self._g_batch is not None
+                else 0,
+            }
 
     def broadcast_a_inv(
         self,
@@ -300,12 +338,22 @@ class KFACBaseLayer:
             raise AssertionError(
                 f'Unknown allreduce_method={self.allreduce_method}',
             )
-        self.a_factor = allreduce(  # type: ignore
-            self.a_factor,
-            average=True,
-            symmetric=self.symmetric_factors and self.symmetry_aware,
-            group=group,
-        )
+        if isinstance(self.a_factor, list):
+            self.a_factor = [
+                allreduce(
+                    af,
+                    average=True,
+                    symmetric=self.symmetric_factors and self.symmetry_aware,
+                    group=group,
+                ) for af in self.a_factor
+            ]
+        else:
+            self.a_factor = allreduce(  # type: ignore
+                self.a_factor,
+                average=True,
+                symmetric=self.symmetric_factors and self.symmetry_aware,
+                group=group,
+            )
 
     def reduce_g_factor(self, group: dist.ProcessGroup | None = None) -> None:
         """Initiate reduction of G and store future to result.
@@ -328,12 +376,22 @@ class KFACBaseLayer:
             raise AssertionError(
                 f'Unknown allreduce_method={self.allreduce_method}',
             )
-        self.g_factor = allreduce(  # type: ignore
-            self.g_factor,
-            average=True,
-            symmetric=self.symmetric_factors and self.symmetry_aware,
-            group=group,
-        )
+        if isinstance(self.g_factor, list):
+            self.g_factor = [
+                allreduce(
+                    gf,
+                    average=True,
+                    symmetric=self.symmetric_factors and self.symmetry_aware,
+                    group=group,
+                ) for gf in self.g_factor
+            ]
+        else:
+            self.g_factor = allreduce(  # type: ignore
+                self.g_factor,
+                average=True,
+                symmetric=self.symmetric_factors and self.symmetry_aware,
+                group=group,
+            )
 
     def reset_batch(self) -> None:
         """Clears current buffers for A and G."""
@@ -347,30 +405,54 @@ class KFACBaseLayer:
         # Note: the clone here is a fix for "RuntimeError: one of the variables
         # needed for gradient computation has been modified by an inplace
         # operation" in the ResNet50 + ImageNet example.
-        a = input_[0].to(self.factor_dtype).clone()
-        a = self.module.get_a_factor(a)
-        if self._a_batch is None:
-            self._a_batch = a
-            self._a_count = 1
+        if len(input_) > 1:
+            # add support to non-single input layer
+            a = [t.to(self.factor_dtype).clone() for t in input_]
         else:
-            self._a_batch = self._a_batch + a
-            self._a_count += 1
+            a = input_[0].to(self.factor_dtype).clone()
+        a = self.module.get_a_factor(a)
+        if isinstance(a, torch.Tensor):
+            if self._a_batch is None:
+                self._a_batch = a
+                self._a_count = 1
+            else:
+                self._a_batch = self._a_batch + a
+                self._a_count += 1
+        elif isinstance(a, list):
+            if self._a_batch is None:
+                self._a_batch = a
+                self._a_count = 1
+            else:
+                self._a_batch = [ab + a for ab, a in zip(self._a_batch, a)]
+                self._a_count += 1
 
     def save_layer_grad_output(
         self,
         grad_output: tuple[torch.Tensor, ...],
     ) -> None:
         """Save grad w.r.t outputs for layer."""
-        g = grad_output[0].to(self.factor_dtype)
+        if len(grad_output) > 1:
+            # add support to non-single output layer
+            g = [t.to(self.factor_dtype) for t in grad_output]
+        else:
+            g = grad_output[0].to(self.factor_dtype)
         if self.grad_scaler is not None:
             g = g / self.grad_scaler()
         g = self.module.get_g_factor(g)
-        if self._g_batch is None:
-            self._g_batch = g
-            self._g_count = 1
-        else:
-            self._g_batch = self._g_batch + g
-            self._g_count += 1
+        if isinstance(g, torch.Tensor):
+            if self._g_batch is None:
+                self._g_batch = g
+                self._g_count = 1
+            else:
+                self._g_batch = self._g_batch + g
+                self._g_count += 1
+        elif isinstance(g, list):
+            if self._g_batch is None:
+                self._g_batch = g
+                self._g_count = 1
+            else:
+                self._g_batch = [gb + g for gb, g in zip(self._g_batch, g)]
+                self._g_count += 1
 
     def update_a_factor(self, alpha: float = 0.95) -> None:
         """Compute factor A and add to running averages.
@@ -380,13 +462,26 @@ class KFACBaseLayer:
         """
         if self._a_batch is None:
             return
-        if self._a_count > 1:
-            self._a_batch = (1 / self._a_count) * self._a_batch
-        a_new = self._a_batch
-        self._a_batch = None
-        if self.a_factor is None:
-            self.a_factor = torch.diag(a_new.new(a_new.shape[0]).fill_(1))
-        self.a_factor = (alpha * self.a_factor) + ((1 - alpha) * a_new)
+
+        if isinstance(self._a_batch, list):
+            if self.a_factor is None:
+                self.a_factor = []
+            for idx, ab in enumerate(self._a_batch):
+                if self._a_count > 1:
+                    ab = (1 / self._a_count) * ab
+                a_new = ab
+                ab = None
+                if len(self.a_factor) <= idx:
+                    self.a_factor.append(torch.diag(a_new.new(a_new.shape[0]).fill_(1)))
+                self.a_factor[idx] = (alpha * self.a_factor[idx]) + ((1 - alpha) * a_new)
+        else:
+            if self._a_count > 1:
+                self._a_batch = (1 / self._a_count) * self._a_batch
+            a_new = self._a_batch
+            self._a_batch = None
+            if self.a_factor is None:
+                self.a_factor = torch.diag(a_new.new(a_new.shape[0]).fill_(1))
+            self.a_factor = (alpha * self.a_factor) + ((1 - alpha) * a_new)
 
     def update_g_factor(self, alpha: float = 0.95) -> None:
         """Compute factor G and add to running averages.
@@ -396,13 +491,26 @@ class KFACBaseLayer:
         """
         if self._g_batch is None:
             return
-        if self._g_count > 1:
-            self._g_batch = (1 / self._g_count) * self._g_batch
-        g_new = self._g_batch
-        self._g_batch = None
-        if self.g_factor is None:
-            self.g_factor = torch.diag(g_new.new(g_new.shape[0]).fill_(1))
-        self.g_factor = (alpha * self.g_factor) + ((1 - alpha) * g_new)
+
+        if isinstance(self._a_batch, list):
+            if self.g_factor is None:
+                self.g_factor = []
+            for idx, gb in enumerate(self._g_batch):
+                if self._g_count > 1:
+                    gb = (1 / self._g_count) * gb
+                g_new = gb
+                gb = None
+                if len(self.g_factor) <= idx:
+                    self.g_factor.append(torch.diag(g_new.new(g_new.shape[0]).fill_(1)))
+                self.g_factor[idx] = (alpha * self.g_factor[idx]) + ((1 - alpha) * g_new)
+        else:
+            if self._g_count > 1:
+                self._g_batch = (1 / self._g_count) * self._g_batch
+            g_new = self._g_batch
+            self._g_batch = None
+            if self.g_factor is None:
+                self.g_factor = torch.diag(g_new.new(g_new.shape[0]).fill_(1))
+            self.g_factor = (alpha * self.g_factor) + ((1 - alpha) * g_new)
 
     def update_grad(self, scale: float | None = None) -> None:
         """Updates gradients of module with computed precondition gradients.
