@@ -10,7 +10,6 @@ import torch
 from kfac.layers.utils import append_bias_ones
 from kfac.layers.utils import get_cov
 
-from torch.func import grad
 from e3nn.util import prod
 
 from torch import fx
@@ -156,12 +155,14 @@ class E3nnTPModuleHelper(ModuleHelper):
         # import ipdb; ipdb.set_trace()
         with torch.no_grad():
             out = self.cogen_a_factor(*a)
+        #jimport ipdb; ipdb.set_trace()
         return out
 
     def get_g_factor(self, g: torch.Tensor) -> torch.Tensor:
         #import ipdb; ipdb.set_trace()
         with torch.no_grad():
             out = self.cogen_g_factor(g)
+        #import ipdb; ipdb.set_trace()
         return out
 
     def g_size_from_instructions(self, instructions):
@@ -188,7 +189,7 @@ def codegen_tensor_product_g_factor(
         instructions: List[Instruction]=None,
         specialized_code: bool = True,
         optimize_einsums: bool = True,
-        mode: str = 'sum_after',
+        mode: str = 'avg_after',
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     # TODO:
     #     reshape and extract gs for individual insturction
@@ -208,16 +209,11 @@ def codegen_tensor_product_g_factor(
     assert len(instructions) > 0, "no instructions, please check network config."
 
     batch_numel = g_res.shape[0]
-    weight_numel = sum(prod(ins.path_shape) for ins in instructions if ins.has_weight)
-
-    flat_weight_index = 0
 
     g_res_list = [
             g_res[:, i].reshape(batch_numel, mul_ir.mul, mul_ir.ir.dim)
             for i, mul_ir in zip(irreps_out.slices(), irreps_out)
         ]
-
-
 
     # fixme: here to concat gg^t
     outputs = []
@@ -250,33 +246,27 @@ def codegen_tensor_product_g_factor(
             else:
                 g = g_path
         else:
-            notimplementederror("not supporting yet")
+            raise NotImplementedError("not supporting yet")
 
 
         # aggregate g factor
         if mode == 'avg_pre':
             g = g.reshape(batch_numel, mul_ir_out.ir.dim, -1) 
             g = torch.mean(g, dim=1, keepdim=False)
-            scale = 1. / batch_numel
-            ggt = scale * g.T @ g
+            ggt = g.T @ (g / batch_numel)
         if mode == 'sum_pre':
             g = g.reshape(batch_numel, mul_ir_out.ir.dim, -1) 
             g = torch.sum(g, dim=1, keepdim=False)
-            scale = 1. / batch_numel
-            ggt = scale * g.T @ g
+            ggt = g.T @ (g / batch_numel)
         if mode == 'avg_after':
-            g = g.reshape(batch_numel * mul_ir_out.ir.dim, -1) 
-            scale = 1. / (batch_numel * mul_ir_out.ir.dim)
-            ggt = scale * g.T @ g
+            g = g.reshape(batch_numel * mul_ir_out.ir.dim, -1)
+            ggt = g.T @ (g / (batch_numel * mul_ir_out.ir.dim))
         if mode == 'sum_after':
             g = g.reshape(batch_numel * mul_ir_out.ir.dim, -1) 
-            scale = 1. / (batch_numel * mul_ir_out.ir.dim)
-            ggt = scale * g.T @ g * mul_ir_out.ir.dim
-
-
+            ggt = g.T @ (g / batch_numel)
+        
+        ggt = (ggt.T + ggt) / 2.0 # numerical stability
         outputs += [ggt.node,]
-    
-    #print(outputs)
 
     graph.output(outputs, List[torch.Tensor])
 
@@ -303,7 +293,7 @@ def codegen_tensor_product_a_factor(
         instructions: List[Instruction]=None,
         specialized_code: bool = True,
         optimize_einsums: bool = True,
-        mode: str = 'sum_after',
+        mode: str = 'avg_after',
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     graph = fx.Graph()
 
@@ -401,28 +391,25 @@ def codegen_tensor_product_a_factor(
             else:
                 a = torch.einsum(f"ijk,zuvij->zkuv", w3j, xx)
         else:
-            NotImplementedError("not supporting yet")
+            raise NotImplementedError("not supporting yet")
 
         # aggregate a factor
         if mode == 'avg_pre':
             a = a.reshape(batch_numel, mul_ir_out.ir.dim, -1) 
             a = torch.mean(a, dim=1, keepdim=False)
-            scale = 1. / batch_numel
-            aat = scale * a.T @ a
+            aat = a.T @ (a / batch_numel)
         if mode == 'sum_pre':
             a = a.reshape(batch_numel, mul_ir_out.ir.dim, -1) 
             a = torch.sum(a, dim=1, keepdim=False)
-            scale = 1. / batch_numel
-            aat = scale * a.T @ a
+            aat = a.T @ (a / batch_numel)
         if mode == 'avg_after':
-            a = a.reshape(batch_numel * mul_ir_out.ir.dim, -1) 
-            scale = 1. / (batch_numel * mul_ir_out.ir.dim)
-            aat = scale * a.T @ a
+            a = a.reshape(batch_numel * mul_ir_out.ir.dim, -1)
+            aat = a.T @ (a / (batch_numel * mul_ir_out.ir.dim))
         if mode == 'sum_after':
             a = a.reshape(batch_numel * mul_ir_out.ir.dim, -1) 
-            scale = 1. / (batch_numel * mul_ir_out.ir.dim)
-            aat = scale * a.T @ a * mul_ir_out.ir.dim
+            aat = a.T @ (a / batch_numel)
 
+        aat = (aat.T + aat) / 2.0
         outputs += [aat.node,]
         
         # remove unused w3j

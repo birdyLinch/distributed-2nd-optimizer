@@ -361,6 +361,37 @@ class BaseKFACPreconditioner:
                         group=self._assignment.grad_worker_group(name),
                     )
             self._tdc.flush_allreduce_buckets()
+            # sk = []
+            # li = []
+            # for name, layer in reversed(list(self._layers.values())):
+            #     if 'skip' in name:
+            #         sk += layer.dgda
+            #     else:
+            #         li += layer.dgda
+
+            # sk = [s.cpu().flatten() for s in sk]
+            # li = [l.cpu().flatten() for l in li]
+            # sk = torch.cat(sk)
+            # li = torch.cat(li)
+
+            # sk = sk.numpy()
+            # li = li.numpy()
+
+            # import termplotlib as tpl
+            # import numpy as np
+            # sample = sk
+            # print("FullyConnectedTP -->")
+            # counts, bin_edges = np.histogram(sample, bins=40)
+            # fig = tpl.figure()
+            # fig.hist(counts, bin_edges, grid=[15, 25], force_ascii=False)
+            # fig.show()
+
+            # sample = li
+            # print("_Linear -->")
+            # counts, bin_edges = np.histogram(sample, bins=40)
+            # fig = tpl.figure()
+            # fig.hist(counts, bin_edges, grid=[15, 25], force_ascii=False)
+            # fig.show()
 
         # Compute Preconditioned Gradients
         for name, layer in reversed(list(self._layers.values())):

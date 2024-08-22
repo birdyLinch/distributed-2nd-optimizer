@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Callable
-from typing import cast
+from typing import cast, List
 
 import torch
 import torch.distributed as dist
@@ -425,12 +425,22 @@ class KFACEigenLayer(KFACBaseLayer):
 
         if self._list_tensors:
             if self.symmetric_factors:
-                #import ipdb; ipdb.set_trace()
-                self.da, self.qa = zip(*[
-                    torch.linalg.eigh(
-                        af.to(torch.float32),
-                    ) for af in self.a_factor
-                ])
+                # import ipdb; ipdb.set_trace()
+                try:
+                    self.da, self.qa = zip(*[
+                        torch.linalg.eigh(
+                            af.to(torch.float32),
+                        ) for af in self.a_factor
+                    ])
+                except torch._C._LinAlgError as e:
+                    # print(e)
+                    for af in self.a_factor:
+                        try:
+                            torch.linalg.eigh(
+                               af.to(torch.float32),
+                            )
+                        except:
+                            import ipdb; ipdb.set_trace()
             else:
                 da, qa = zip(*[
                     torch.linalg.eig(
@@ -465,6 +475,7 @@ class KFACEigenLayer(KFACBaseLayer):
 
         if self._list_tensors:
             if self.symmetric_factors:
+                # import ipdb; ipdb.set_trace()
                 self.dg, self.qg = zip(*[
                     torch.linalg.eigh(
                         gf.to(torch.float32),
@@ -537,8 +548,6 @@ class KFACEigenLayer(KFACBaseLayer):
         grad_type = grad.dtype
         grad = grad.to(self.qa[0].dtype)
 
-        import ipdb; ipdb.set_trace()
-
         if self._list_tensors:
             qg_sizes = [qg.size(0) for qg in self.qg]
             qa_sizes = [qa.size(0) for qa in self.qa]
@@ -548,18 +557,18 @@ class KFACEigenLayer(KFACBaseLayer):
             
             conditioned_grads = []
             for grad, qg, qa, dgda in zip(grad_segs, self.qg, self.qa, self.dgda):
-                v1 = qg.t() @ grad.reshape(qg.size(0), qa.size(0)) @ qa
+                v1 = qg.t() @ grad.reshape(qa.size(0), qg.size(0)).T @ qa # FIXME: Fixed this!!! weight grad shape (a.size(0), g.size(0))
                 if self.prediv_eigenvalues:
                     v2 = v1 * dgda
                 else:
                     v2 = v1 / (
                             torch.outer(
-                                cast(torch.Tensor, dg),
-                                cast(torch.Tensor, da),
+                                cast(torch.Tensor, self.dg),
+                                cast(torch.Tensor, self.da),
                             )
                             + damping
                         )
-                conditioned_grads.append((qg @ v2 @ qa.t()).to(grad_type).flatten())
+                conditioned_grads.append((qg @ v2 @ qa.t()).to(grad_type).T.flatten()) # weight grad shape (a.size(0), g.size(0))
             self.grad = torch.cat(conditioned_grads)
         else:
             v1 = self.qg.t() @ grad @ self.qa
