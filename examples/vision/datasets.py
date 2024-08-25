@@ -124,7 +124,7 @@ def make_sampler_and_loader(
     """Create sampler and dataloader for train and val datasets."""
     torch.set_num_threads(4)
     kwargs: dict[str, Any] = (
-        {'num_workers': 4, 'pin_memory': True} if args.cuda else {}
+            {'num_workers': 4, 'pin_memory': True} if args.cuda else {'num_workers': 4, 'pin_memory': True}
     )
     kwargs['prefetch_factor'] = 8
     kwargs['persistent_workers'] = True

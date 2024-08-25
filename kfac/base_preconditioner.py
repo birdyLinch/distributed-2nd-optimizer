@@ -92,7 +92,7 @@ class BaseKFACPreconditioner:
             raise ValueError('damping must be > 0')
         if not callable(factor_decay) and not 0.0 < factor_decay <= 1:
             raise ValueError('factor_decay must be in (0, 1]')
-        if not callable(kl_clip) and not 0.0 < kl_clip:
+        if not callable(kl_clip) and (kl_clip is not None) and not 0.0 < kl_clip:
             raise ValueError('kl_clip must be > 0')
         if not callable(lr) and not 0.0 <= lr:
             raise ValueError('lr be > 0')

@@ -18,6 +18,7 @@ from kfac.layers.modules import ModuleHelper
 
 from .modules import E3nnTPModuleHelper
 
+EPS=1e-8
 
 class KFACEigenLayer(KFACBaseLayer):
     """KFAC layer that preconditions gradients with eigen decomposition."""
@@ -429,7 +430,7 @@ class KFACEigenLayer(KFACBaseLayer):
                 try:
                     self.da, self.qa = zip(*[
                         torch.linalg.eigh(
-                            af.to(torch.float32),
+                            af.to(torch.float32) + EPS * torch.eye(af.size(0), dtype=torch.float32, device=af.device),
                         ) for af in self.a_factor
                     ])
                 except torch._C._LinAlgError as e:
