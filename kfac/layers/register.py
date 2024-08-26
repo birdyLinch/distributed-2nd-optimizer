@@ -9,19 +9,34 @@ import torch
 from .fcn_tools import _Linear
 
 from kfac.layers.base import KFACBaseLayer
+from kfac.layers.eigen import KFACEigenLayer
+from kfac.layers.inverse import KFACInverseLayer 
+from kfac.layers.eigen_tp import KFACEigenTPLayer
+from kfac.layers.eigen_tp_fast import KFACEigenTPFastLayer
 from kfac.layers.modules import Conv2dModuleHelper
 from kfac.layers.modules import LinearModuleHelper
 from kfac.layers.modules import ModuleHelper
 from kfac.layers.modules import E3nnLayerModuleHelper
 from kfac.layers.modules import E3nnTPModuleHelper
+from kfac.layers.modules import E3nnTPFastModuleHelper
 import logging
 
 from e3nn import o3
+
+FAST = True
 
 KNOWN_MODULES = {'linear', 'conv2d', '_Linear'}
 LINEAR_TYPES: tuple[type[torch.nn.Module], ...] = (torch.nn.Linear,)
 CONV2D_TYPES: tuple[type[torch.nn.Module], ...] = (torch.nn.Conv2d,)
 E3NN_LAYER_TYPES: tuple[type[torch.nn.Module], ...] = (o3.FullyConnectedTensorProduct, _Linear)
+
+LAYERTYPE2KFACLAYER = {
+    LINEAR_TYPES: None,
+    CONV2D_TYPES: None,
+    o3.FullyConnectedTensorProduct: KFACEigenTPFastLayer if FAST else KFACEigenTPLayer, 
+    _Linear: None,
+}
+
 
 # TODO: support o3.linear
 #       support o3.FullyConnectedTensorProduct
@@ -63,21 +78,28 @@ def requires_grad(module: torch.nn.Module) -> bool:
     return all([p.requires_grad for p in module.parameters()])
 
 
-def get_module_helper(module: torch.nn.Module) -> ModuleHelper | None:
+def get_module_helper_and_kfac_layer(
+    module: torch.nn.Module, 
+    default_kfac_layer: KFACBaseLayer
+) -> tuple[ModuleHelper, KFACBaseLayer] | None:
     """Return KFAC module helper that wraps a PyTorch module."""
     if isinstance(module, LINEAR_TYPES):
-        return LinearModuleHelper(module)
+        kfac_layer = default_kfac_layer if LAYERTYPE2KFACLAYER[LINEAR_TYPES] is None else LAYERTYPE2KFACLAYER[LINEAR_TYPES] 
+        return LinearModuleHelper(module), kfac_layer
     elif isinstance(module, CONV2D_TYPES):
-        return Conv2dModuleHelper(module)  # type: ignore
+        kfac_layer = default_kfac_layer if LAYERTYPE2KFACLAYER[CONV2D_TYPES] is None else LAYERTYPE2KFACLAYER[LINEAR_TYPES] 
+        return Conv2dModuleHelper(module), kfac_layer  # type: ignore
     elif isinstance(module, E3NN_LAYER_TYPES):
         if isinstance(module, _Linear):
-            return E3nnLayerModuleHelper(module)
+            kfac_layer = default_kfac_layer if LAYERTYPE2KFACLAYER[_Linear] is None else LAYERTYPE2KFACLAYER[_Linear] 
+            return E3nnLayerModuleHelper(module), kfac_layer
         elif isinstance(module, o3.Linear):
-            return None
+            return None, default_kfac_layer
         elif isinstance(module, o3.FullyConnectedTensorProduct):
-            return E3nnTPModuleHelper(module)
+            kfac_layer = default_kfac_layer if LAYERTYPE2KFACLAYER[o3.FullyConnectedTensorProduct] is None else LAYERTYPE2KFACLAYER[o3.FullyConnectedTensorProduct] 
+            return E3nnTPFastModuleHelper(module) if FAST else E3nnTPModuleHelper(module), kfac_layer
     else:
-        return None
+        return None, default_kfac_layer
 
 
 def any_match(query: str, patterns: list[str]) -> bool:
@@ -119,11 +141,13 @@ def register_modules(
             and not any_match(module.__class__.__name__, skip_layers)
             and requires_grad(module)
         ):
-            module_helper = get_module_helper(module)
+            module_helper, selected_kfac_layer = get_module_helper_and_kfac_layer(module, kfac_layer_type)
+
             if module_helper is None:
                 continue
-
-            kfac_layer = kfac_layer_type(module_helper, **layer_kwargs)
+            
+            print(f"selected KFACLayer --> {selected_kfac_layer}")
+            kfac_layer = selected_kfac_layer(module_helper, **layer_kwargs)
 
             # get_flattened_modules() should never give us modules with the
             # same name

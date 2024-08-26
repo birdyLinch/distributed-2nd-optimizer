@@ -407,7 +407,6 @@ def codegen_tensor_product_a_factor(
 
         aat = (aat.T + aat) / 2.0
         outputs += [aat.node,]
-        outputs += [a.node,]
         
         # remove unused w3j
         if len(w3j.node.users) == 0:
