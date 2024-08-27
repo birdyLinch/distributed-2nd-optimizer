@@ -302,7 +302,7 @@ def codegen_tensor_product_a_factor_fast(
 
         aat1 = (a_hat_a_hat_t_in1.T + a_hat_a_hat_t_in1) / 2.0
         aat2 = (a_hat_a_hat_t_in2.T + a_hat_a_hat_t_in2) / 2.0
-        outputs += [aat1.node, att2.node] # outputs[0::2] for first factor; outputs[1::2] for second factor
+        outputs += [aat1.node, aat2.node] # outputs[0::2] for first factor; outputs[1::2] for second factor
         
 
     graph.output(outputs, List[torch.Tensor])

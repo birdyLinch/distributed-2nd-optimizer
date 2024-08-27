@@ -323,19 +323,18 @@ class KFACEigenTPFastLayer(KFACBaseLayer):
 
             self.qa = [
                 torch.empty(
-                    af.shape,
-                    device=af.device,
+                    (af1.size(0) * af2.size(0), af1.size(0) * af2.size(0)),
+                    device=af1.device,
                     dtype=self.inv_dtype,
-                ) for af in self.a_factor
+                    ) for af1, af2 in zip(self.a_factor[0::2], self.a_factor[1::2])
             ]
             self.da = [
                 torch.empty(
-                    af.shape[0],
-                    device=af.device,
+                    af1.size(0) * af2.size(0),
+                    device=af1.device,
                     dtype=self.inv_dtype,
-                ) for af in self.a_factor
+                    ) for af1, af2 in zip(self.a_factor[0::2], self.a_factor[1::2])
             ]
-
 
         self.qa = [
             self.tdc.broadcast(
@@ -344,6 +343,7 @@ class KFACEigenTPFastLayer(KFACBaseLayer):
                 group=group
             ) for qa in self.qa
         ]
+
         if not self.prediv_eigenvalues:
             assert self.da is not None
             self.da = [
@@ -403,10 +403,10 @@ class KFACEigenTPFastLayer(KFACBaseLayer):
                 assert isinstance(self.a_factor, list)
                 self.dgda = [
                     torch.empty(
-                        (gf.shape[0], af.shape[0]),
+                        (gf.shape[0], af1.shape[0] * af2.shape[0]),
                         device=gf.device,
                         dtype=self.inv_dtype,
-                    ) for gf, af in zip(self.g_factor, self.a_factor)
+                        ) for gf, af1, af2 in zip(self.g_factor, self.a_factor[0::2], self.a_factor[1::2])
                 ]
 
         self.pg = [
@@ -434,6 +434,7 @@ class KFACEigenTPFastLayer(KFACBaseLayer):
                     group=group,
                 ) for dgda in self.dgda
             ]
+        
 
     def compute_a_inv(self, damping: float = 0.001) -> None:
         """Compute A inverse on assigned rank.
@@ -444,21 +445,26 @@ class KFACEigenTPFastLayer(KFACBaseLayer):
             damping (float, optional): damping value to condition inverse
                 (default: 0.001).
         """
+
         if not isinstance(self.a_factor, (torch.Tensor, list)):
             raise RuntimeError(
                 'Cannot eigendecompose A before A has been computed',
             )
-
+            
         if self.symmetric_factors:
-            # import ipdb; ipdb.set_trace()
             try:
-                self.da, self.qa = zip(*[
+                da1, qa1 = zip(*[
                     torch.linalg.eigh(
                         af.to(torch.float32) + EPS * torch.eye(af.size(0), dtype=torch.float32, device=af.device),
-                    ) for af in self.a_factor
+                        ) for af in self.a_factor[0::2]
+                ])
+                da2, qa2 = zip(*[
+                    torch.linalg.eigh(
+                        af.to(torch.float32) + EPS * torch.eye(af.size(0), dtype=torch.float32, device=af.device),
+                        ) for af in self.a_factor[1::2]
                 ])
             except torch._C._LinAlgError as e:
-                # print(e)
+                print(e)
                 for af in self.a_factor:
                     try:
                         torch.linalg.eigh(
@@ -467,26 +473,29 @@ class KFACEigenTPFastLayer(KFACBaseLayer):
                     except:
                         import ipdb; ipdb.set_trace()
         else:
-            da, qa = zip(*[
+            da1, qa1 = zip(*[
                 torch.linalg.eig(
                     af.to(torch.float32),
-                ) for af in self.a_factor
+                    ) for af in self.a_factor[0::2]
             ])
-            self.da = [mat.real for mat in da]
-            self.qa = [mat.real for mat in qa]
-        self.qa = [cast(torch.Tensor, mat).to(self.inv_dtype) for mat in self.qa]
-        self.da = [torch.clamp(cast(torch.Tensor, mat).to(self.inv_dtype), min=0.0) for mat in self.da]
+            da2, qa2 = zip(*[
+                torch.linalg.eig(
+                    af.to(torch.float32),
+                    ) for af in self.a_factor[1::2]
+            ])
+            da1 = [mat.real for mat in da1]
+            qa1 = [mat.real for mat in qa1]
+            da2 = [mat.real for mat in da2]
+            qa2 = [mat.real for mat in qa2]
 
-        qa1 = self.qa[0::2]
-        qa2 = self.qa[1::2]
-
-        da1 = self.da[0::2] 
-        da2 = self.da[1::2]
+        qa1 = [cast(torch.Tensor, mat).to(self.inv_dtype) for mat in qa1]
+        da1 = [torch.clamp(cast(torch.Tensor, mat).to(self.inv_dtype), min=0.0) for mat in da1]
+        qa2 = [cast(torch.Tensor, mat).to(self.inv_dtype) for mat in qa2]
+        da2 = [torch.clamp(cast(torch.Tensor, mat).to(self.inv_dtype), min=0.0) for mat in da2]
 
         # Fast mode: another kronecker factor decomposition
         self.da = [torch.kron(_da1, _da2) for _da1, _da2 in zip(da1, da2)]
-        self.qa = [torch.kron(_qa1, _qa1) for _qa1, _qa2 in zip(qa1, qa2)]
-
+        self.qa = [torch.kron(_qa1, _qa2) for _qa1, _qa2 in zip(qa1, qa2)]
 
 
     def compute_g_inv(self, damping: float = 0.001) -> None:
@@ -497,7 +506,6 @@ class KFACEigenTPFastLayer(KFACBaseLayer):
             )
 
         if self.symmetric_factors:
-            # import ipdb; ipdb.set_trace()
             self.dg, self.qg = zip(*[
                 torch.linalg.eigh(
                     gf.to(torch.float32),
@@ -553,8 +561,10 @@ class KFACEigenTPFastLayer(KFACBaseLayer):
 
         qg_sizes = [qg.size(0) for qg in self.qg]
         qa_sizes = [qa.size(0) for qa in self.qa]
+
+        assert(len(qg_sizes) == len(qa_sizes)) # multigpu False
+
         segment_sizes = [qgs*qas for qgs, qas in zip(qg_sizes, qa_sizes)] 
-        #import ipdb; ipdb.set_trace()
         grad_segs = list(grad.reshape(-1).split(segment_sizes))
         
         conditioned_grads = []

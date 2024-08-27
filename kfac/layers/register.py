@@ -23,7 +23,7 @@ import logging
 
 from e3nn import o3
 
-FAST = True
+FAST = False
 
 KNOWN_MODULES = {'linear', 'conv2d', '_Linear'}
 LINEAR_TYPES: tuple[type[torch.nn.Module], ...] = (torch.nn.Linear,)
@@ -33,7 +33,7 @@ E3NN_LAYER_TYPES: tuple[type[torch.nn.Module], ...] = (o3.FullyConnectedTensorPr
 LAYERTYPE2KFACLAYER = {
     LINEAR_TYPES: None,
     CONV2D_TYPES: None,
-    o3.FullyConnectedTensorProduct: KFACEigenTPFastLayer if FAST else KFACEigenTPLayer, 
+    o3.FullyConnectedTensorProduct: KFACEigenTPFastLayer, 
     _Linear: None,
 }
 
@@ -89,15 +89,14 @@ def get_module_helper_and_kfac_layer(
     elif isinstance(module, CONV2D_TYPES):
         kfac_layer = default_kfac_layer if LAYERTYPE2KFACLAYER[CONV2D_TYPES] is None else LAYERTYPE2KFACLAYER[LINEAR_TYPES] 
         return Conv2dModuleHelper(module), kfac_layer  # type: ignore
-    elif isinstance(module, E3NN_LAYER_TYPES):
-        if isinstance(module, _Linear):
-            kfac_layer = default_kfac_layer if LAYERTYPE2KFACLAYER[_Linear] is None else LAYERTYPE2KFACLAYER[_Linear] 
-            return E3nnLayerModuleHelper(module), kfac_layer
-        elif isinstance(module, o3.Linear):
-            return None, default_kfac_layer
-        elif isinstance(module, o3.FullyConnectedTensorProduct):
-            kfac_layer = default_kfac_layer if LAYERTYPE2KFACLAYER[o3.FullyConnectedTensorProduct] is None else LAYERTYPE2KFACLAYER[o3.FullyConnectedTensorProduct] 
-            return E3nnTPFastModuleHelper(module) if FAST else E3nnTPModuleHelper(module), kfac_layer
+    elif isinstance(module, _Linear):
+        kfac_layer = default_kfac_layer if LAYERTYPE2KFACLAYER[_Linear] is None else LAYERTYPE2KFACLAYER[_Linear] 
+        return E3nnLayerModuleHelper(module), kfac_layer
+    elif isinstance(module, o3.Linear):
+        return None, default_kfac_layer
+    elif isinstance(module, o3.FullyConnectedTensorProduct):
+        kfac_layer = default_kfac_layer if LAYERTYPE2KFACLAYER[o3.FullyConnectedTensorProduct] is None else LAYERTYPE2KFACLAYER[o3.FullyConnectedTensorProduct] 
+        return E3nnTPFastModuleHelper(module), kfac_layer
     else:
         return None, default_kfac_layer
 

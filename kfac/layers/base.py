@@ -245,6 +245,8 @@ class KFACBaseLayer:
                 )
             self.grad = torch.empty_like(self.module.get_grad())
 
+        print("broadcast grad")
+
         self.grad = self.tdc.broadcast(  # type: ignore
             self.grad,
             src=src,

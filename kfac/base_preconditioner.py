@@ -321,7 +321,6 @@ class BaseKFACPreconditioner:
             `DistributedDataParallel` model wrapper as gradients are
             communicated during `loss.backward()`.
         """
-        #import ipdb; ipdb.set_trace()
         if (
             not self._update_factors_in_hook
             and self.steps % self.factor_update_steps == 0
@@ -336,6 +335,7 @@ class BaseKFACPreconditioner:
         # Flush last allreduce bucket from forward/backward pass.
         # Will be a no-op if bucketing was not used
         self._tdc.flush_allreduce_buckets()
+
 
         # Compute Inverses
         if self.steps % self.inv_update_steps == 0:
@@ -360,38 +360,8 @@ class BaseKFACPreconditioner:
                         src=self._assignment.inv_worker(name, 'G'),
                         group=self._assignment.grad_worker_group(name),
                     )
+
             self._tdc.flush_allreduce_buckets()
-            # sk = []
-            # li = []
-            # for name, layer in reversed(list(self._layers.values())):
-            #     if 'skip' in name:
-            #         sk += layer.dgda
-            #     else:
-            #         li += layer.dgda
-
-            # sk = [s.cpu().flatten() for s in sk]
-            # li = [l.cpu().flatten() for l in li]
-            # sk = torch.cat(sk)
-            # li = torch.cat(li)
-
-            # sk = sk.numpy()
-            # li = li.numpy()
-
-            # import termplotlib as tpl
-            # import numpy as np
-            # sample = sk
-            # print("FullyConnectedTP -->")
-            # counts, bin_edges = np.histogram(sample, bins=40)
-            # fig = tpl.figure()
-            # fig.hist(counts, bin_edges, grid=[15, 25], force_ascii=False)
-            # fig.show()
-
-            # sample = li
-            # print("_Linear -->")
-            # counts, bin_edges = np.histogram(sample, bins=40)
-            # fig = tpl.figure()
-            # fig.hist(counts, bin_edges, grid=[15, 25], force_ascii=False)
-            # fig.show()
 
         # Compute Preconditioned Gradients
         for name, layer in reversed(list(self._layers.values())):

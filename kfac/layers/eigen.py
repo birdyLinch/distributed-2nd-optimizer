@@ -426,7 +426,6 @@ class KFACEigenLayer(KFACBaseLayer):
 
         if self._list_tensors:
             if self.symmetric_factors:
-                # import ipdb; ipdb.set_trace()
                 try:
                     self.da, self.qa = zip(*[
                         torch.linalg.eigh(
@@ -434,7 +433,7 @@ class KFACEigenLayer(KFACBaseLayer):
                         ) for af in self.a_factor
                     ])
                 except torch._C._LinAlgError as e:
-                    # print(e)
+                    print(e)
                     for af in self.a_factor:
                         try:
                             torch.linalg.eigh(
